@@ -2,7 +2,7 @@ name: ARC legacy smoke
 on: [workflow_dispatch]
 jobs:
   smoke:
-    runs-on: [self-hosted, arc, k8s]
+    runs-on: [arc, k8s]
     steps:
       - run: |
           echo "Hola desde runner legacy 👋"
