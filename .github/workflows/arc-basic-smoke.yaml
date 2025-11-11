@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: arc-runner-set   # Debe coincidir con tu runnerScaleSetName
+    runs-on: arc-runner-set
+    container:
+      image: alpine:3.20
     timeout-minutes: 15
 
     steps:
@@ -29,7 +31,6 @@ jobs:
           echo "Runner name: $RUNNER_NAME"
           echo "Runner labels: $RUNNER_TRACKING_ID (interno), usa 'runs-on: arc-runner-set'"
 
-      # Instala AWS CLI v2 de forma sencilla (sin sudo) y la agrega al PATH
       - name: Install AWS CLI v2
         uses: aws-actions/setup-cli@v4
         with:
@@ -40,25 +41,21 @@ jobs:
           which aws || true
           aws --version
 
-      # Condicional: solo cuando es un Pull Request
       - name: Mensaje para PR
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           echo "Este es un PR #${{ github.event.number }} desde ${{ github.head_ref }} ➜ ${{ github.base_ref }}"
 
-      # Condicional: solo cuando es push a main
       - name: Mensaje para push a main
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
           echo "Push directo a main detectado ✅"
 
-      # Condicional: solo cuando es tag con formato v*.*.*
       - name: Mensaje para release tag
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         run: |
           echo "Build de release para la etiqueta: ${{ github.ref_name }}"
 
-      # Más prints “útiles” del contexto
       - name: Contexto breve
         run: |
           echo "Workspace: $GITHUB_WORKSPACE"
