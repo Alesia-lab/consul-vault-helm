@@ -14,9 +14,7 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: arc
-    container:
-      image: alpine:3.20
+    runs-on: [self-hosted, arc, k8s]
     timeout-minutes: 15
 
     steps:
