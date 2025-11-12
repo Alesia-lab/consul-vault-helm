@@ -1,15 +1,28 @@
-name: ARC legacy smoke
-on: [workflow_dispatch]
+name: Probar Runner de ARC
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
 jobs:
-  smoke:
-    runs-on: [arc, k8s]
+  build:
+    # ¡La magia! Usa las etiquetas del RunnerDeployment
+    # Debe incluir "self-hosted" y al menos una etiqueta personalizada
+    runs-on: [self-hosted, alesia-runner]
+
     steps:
-      - run: |
-          echo "Hola desde runner legacy 👋"
-          echo "Evento: ${{ github.event_name }}"
-          echo "Runner: $RUNNER_NAME  OS:$RUNNER_OS  Arch:$RUNNER_ARCH"
-      - name: Install AWS CLI v2
-        uses: aws-actions/setup-cli@v4
-        with:
-          awscli-version: '2.x'
-      - run: aws --version
+      - name: Verificar el runner
+        run: |
+          echo "¡Hola desde mi runner en Kubernetes (ARC)!"
+          echo "Este trabajo corre en el runner: $RUNNER_NAME"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ejecutar un build (ejemplo)
+        run: |
+          echo "Simulando un build..."
+          sleep 5
+          echo "Build completado."
