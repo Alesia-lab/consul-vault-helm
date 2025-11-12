@@ -10,7 +10,7 @@ jobs:
   build:
     # ¡La magia! Usa las etiquetas del RunnerDeployment
     # Debe incluir "self-hosted" y al menos una etiqueta personalizada
-    runs-on: [self-hosted, alesia-runner]
+    runs-on: [self-hosted, alesia-runners]
 
     steps:
       - name: Verificar el runner
