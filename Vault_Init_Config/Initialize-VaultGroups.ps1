@@ -134,14 +134,18 @@ function New-VaultPolicy {
 function Test-GroupExists {
     param([string]$GroupName)
     
-    $result = vault identity group list -format=json 2>&1
+    # Listado compatible: vault list identity/group/name
+    $result = vault list -format=json identity/group/name 2>&1
     if ($LASTEXITCODE -ne 0) {
         return $false
     }
     
     $groups = $result | ConvertFrom-Json
-    if ($groups.data.keys) {
+    if ($groups.data.keys) {  # Cuando el formato incluye 'data'
         return $groups.data.keys -contains $GroupName
+    }
+    if ($groups.keys) {       # Algunos formatos devuelven 'keys' a nivel raíz
+        return $groups.keys -contains $GroupName
     }
     return $false
 }
@@ -150,7 +154,7 @@ function Get-GroupInfo {
     param([string]$GroupName)
     
     try {
-        $result = vault identity group read -name $GroupName -format=json 2>&1
+        $result = vault read -format=json "identity/group/name/$GroupName" 2>&1
         if ($LASTEXITCODE -eq 0) {
             return $result | ConvertFrom-Json
         }
@@ -196,9 +200,8 @@ function New-VaultGroup {
     } else {
         # Crear el grupo
         $policiesArg = $Policies -join ','
-        # Escapar el nombre del grupo si contiene espacios o caracteres especiales
-        $groupNameEscaped = "`"$GroupName`""
-        $result = vault identity group create -name="$GroupName" -type=internal -policies=$policiesArg 2>&1
+        # Usar el endpoint write para compatibilidad con versiones de Vault
+        $result = vault write identity/group name="$GroupName" type="internal" policies="$policiesArg" 2>&1
         
         if ($LASTEXITCODE -eq 0) {
             Write-ColorOutput "[OK] Grupo '$GroupName' creado exitosamente con políticas: $policiesArg" $SuccessColor
