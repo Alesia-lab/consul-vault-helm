@@ -289,42 +289,41 @@ function Enable-GitHubAuth {
     }
     
     # Crear el role para GitHub que asigna la política developer
-    $roleName = "github-developer-role"
-    Write-ColorOutput "[INFO] Creando role de GitHub: $roleName" $InfoColor
-    
-    # Verificar si el role ya existe
-    $roleExists = $false
-    try {
-        $existingRole = vault read auth/github/role/$roleName -format=json 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $roleExists = $true
-            $roleData = $existingRole | ConvertFrom-Json
-            if ($roleData.data.policies -contains "developer-policy") {
-                Write-ColorOutput "[OK] El role '$roleName' ya existe y tiene la política correcta" $SuccessColor
+    # En GitHub auth, el mapeo se hace via teams/users, no via role endpoint.
+    $teamName = Read-Host "Ingrese el nombre del equipo de GitHub a mapear (ej: developers)"
+    if ([string]::IsNullOrWhiteSpace($teamName)) {
+        $teamName = "developers"
+    }
+
+    Write-ColorOutput "[INFO] Creando mapeo de equipo GitHub -> política developer: $teamName" $InfoColor
+
+    # Verificar si el mapeo ya existe
+    $teamPath = "auth/github/map/teams/$teamName"
+    $existingMapRaw = vault read -format=json $teamPath 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        try {
+            $mapData = $existingMapRaw | ConvertFrom-Json
+            $pols = $mapData.data.value -split "," | ForEach-Object { $_.Trim() }
+            if ($pols -contains "developer-policy") {
+                Write-ColorOutput "[OK] El equipo '$teamName' ya está mapeado con la política developer-policy" $SuccessColor
                 return $true
             } else {
-                Write-ColorOutput "[ADVERTENCIA] El role '$roleName' ya existe pero NO tiene la política esperada" $WarningColor
-                Write-ColorOutput "[ADVERTENCIA] Se omitirá la creación/actualización de este role" $WarningColor
+                Write-ColorOutput "[ADVERTENCIA] El equipo '$teamName' ya está mapeado pero no incluye developer-policy" $WarningColor
+                Write-ColorOutput "[ADVERTENCIA] Se omitirá para mantener idempotencia" $WarningColor
                 return $false
             }
-        }
-    } catch {
-        # Role no existe, continuar
+        } catch { }
     }
-    
-    if (-not $roleExists) {
-        # Crear el role con la política developer
-        $result = vault write auth/github/role/$roleName policies=developer-policy 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "[OK] Role '$roleName' creado exitosamente con política 'developer-policy'" $SuccessColor
-            return $true
-        } else {
-            Write-ColorOutput "[ERROR] No se pudo crear el role GitHub: $result" $ErrorColor
-            return $false
-        }
+
+    # Crear el mapeo de equipo -> política
+    $result = vault write $teamPath value="developer-policy" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-ColorOutput "[OK] Equipo '$teamName' mapeado a política 'developer-policy'" $SuccessColor
+        return $true
+    } else {
+        Write-ColorOutput "[ERROR] No se pudo crear el mapeo de equipo: $result" $ErrorColor
+        return $false
     }
-    
-    return $true
 }
 
 function Enable-ResponseWrapping {
