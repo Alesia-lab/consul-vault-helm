@@ -217,10 +217,12 @@ function Enable-GitHubAuth {
     Write-ColorOutput "`n[INFO] Configurando autenticación GitHub..." $InfoColor
     
     # Verificar si GitHub auth ya está habilitado
-    $authMethods = vault auth list -format=json 2>&1 | ConvertFrom-Json
+    $authMethodsRaw = vault auth list -format=json 2>&1
+    $authMethods = $null
+    try { $authMethods = $authMethodsRaw | ConvertFrom-Json } catch { }
     $githubEnabled = $false
     
-    if ($authMethods.data) {
+    if ($authMethods -and $authMethods.data) {
         $githubEnabled = $authMethods.data.PSObject.Properties.Name -contains "github/"
     }
     
@@ -239,19 +241,52 @@ function Enable-GitHubAuth {
     # Solicitar información para configurar GitHub
     Write-ColorOutput "`n[INFO] Configuración de GitHub Authentication" $InfoColor
     $orgName = Read-Host "Ingrese el nombre de la organización de GitHub"
+    $useEnterprise = Read-Host "¿Usas GitHub Enterprise? (y/N)"
+    $baseUrl = "https://api.github.com"
+    if ($useEnterprise -match '^(y|Y|s|S)') {
+        $baseUrlInput = Read-Host "Ingrese la URL del API de GitHub Enterprise (ej: https://github.miempresa.com/api/v3)"
+        if (-not [string]::IsNullOrWhiteSpace($baseUrlInput)) {
+            $baseUrl = $baseUrlInput
+        }
+    }
     
     if ([string]::IsNullOrWhiteSpace($orgName)) {
         Write-ColorOutput "[ERROR] El nombre de la organización no puede estar vacío" $ErrorColor
         return $false
     }
     
-    # Configurar la organización
-    $result = vault write auth/github/config organization=$orgName 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput "[ERROR] No se pudo configurar la organización GitHub: $result" $ErrorColor
-        return $false
+    # Leer configuración actual (si existe) para validar idempotencia
+    $currentConfigRaw = vault read -format=json auth/github/config 2>&1
+    $currentConfig = $null
+    if ($LASTEXITCODE -eq 0) {
+        try { $currentConfig = $currentConfigRaw | ConvertFrom-Json } catch { }
     }
-    Write-ColorOutput "[OK] Organización GitHub configurada: $orgName" $SuccessColor
+    
+    if ($currentConfig -and $currentConfig.data) {
+        $currentOrg = $currentConfig.data.organization
+        $currentBase = $currentConfig.data.base_url
+        $orgMatches = ($currentOrg -eq $orgName)
+        # Si base_url no está definido, Vault usa api.github.com
+        $baseMatches = ([string]::IsNullOrWhiteSpace($currentBase) -and $baseUrl -eq "https://api.github.com") -or ($currentBase -eq $baseUrl)
+        
+        if ($orgMatches -and $baseMatches) {
+            Write-ColorOutput "[OK] Configuración de GitHub ya coincide (org: $orgName, base_url: $baseUrl)" $SuccessColor
+        } else {
+            Write-ColorOutput "[ADVERTENCIA] Configuración existente de GitHub no coincide con la esperada" $WarningColor
+            Write-ColorOutput "[ADVERTENCIA] Org actual: $currentOrg | Org esperada: $orgName" $WarningColor
+            Write-ColorOutput "[ADVERTENCIA] Base URL actual: $currentBase | Base URL esperada: $baseUrl" $WarningColor
+            Write-ColorOutput "[ADVERTENCIA] Se omitirá la actualización para mantener idempotencia" $WarningColor
+            return $false
+        }
+    } else {
+        # Configurar la organización y base_url
+        $result = vault write auth/github/config organization="$orgName" base_url="$baseUrl" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-ColorOutput "[ERROR] No se pudo configurar la organización GitHub: $result" $ErrorColor
+            return $false
+        }
+        Write-ColorOutput "[OK] Configuración GitHub aplicada (org: $orgName, base_url: $baseUrl)" $SuccessColor
+    }
     
     # Crear el role para GitHub que asigna la política developer
     $roleName = "github-developer-role"
