@@ -1,0 +1,82 @@
+# Ejemplo: Configuración de Vault usando terraform_remote_state
+# Este archivo muestra cómo obtener los outputs de los clusters de forma segura
+# usando backend remoto en lugar de proporcionar valores manualmente
+#
+# Para usar este enfoque:
+# 1. Renombrar este archivo a main.tf (o incluir en main.tf)
+# 2. Configurar backends remotos en los clusters consumidores
+# 3. Asegurar que los backends tengan los permisos correctos
+
+# ============================================================================
+# Data Sources: Obtener outputs de clusters consumidores
+# ============================================================================
+
+# Outputs del Cluster A desde backend remoto
+data "terraform_remote_state" "cluster_a" {
+  backend = "s3"  # O "gcs", "azurerm", etc.
+
+  config = {
+    bucket         = var.terraform_state_bucket
+    key            = "vault-k8s-auth/cluster-a/terraform.tfstate"
+    region         = var.aws_region
+    encrypt        = true
+    dynamodb_table = var.terraform_state_lock_table
+  }
+}
+
+# Outputs del Cluster B desde backend remoto (opcional)
+data "terraform_remote_state" "cluster_b" {
+  backend = "s3"
+  count   = var.enable_cluster_b ? 1 : 0
+
+  config = {
+    bucket         = var.terraform_state_bucket
+    key            = "vault-k8s-auth/cluster-b/terraform.tfstate"
+    region         = var.aws_region
+    encrypt        = true
+    dynamodb_table = var.terraform_state_lock_table
+  }
+}
+
+# ============================================================================
+# Cluster A - Kubernetes Auth Backend
+# ============================================================================
+
+module "vault_k8s_auth_cluster_a" {
+  source = "./modules/vault_k8s_auth"
+
+  cluster_identifier = "cluster-a"
+  auth_path          = "kubernetes-cluster-a"
+
+  # Obtener valores del remote state
+  kubernetes_host    = data.terraform_remote_state.cluster_a.outputs.kubernetes_host
+  kubernetes_ca_cert = data.terraform_remote_state.cluster_a.outputs.kubernetes_ca_cert
+  token_reviewer_jwt = data.terraform_remote_state.cluster_a.outputs.token_reviewer_jwt
+
+  disable_iss_validation = false
+  disable_local_ca_jwt   = false
+
+  roles = var.cluster_a_roles
+}
+
+# ============================================================================
+# Cluster B - Kubernetes Auth Backend (opcional)
+# ============================================================================
+
+module "vault_k8s_auth_cluster_b" {
+  source = "./modules/vault_k8s_auth"
+  count  = var.enable_cluster_b ? 1 : 0
+
+  cluster_identifier = "cluster-b"
+  auth_path          = "kubernetes-cluster-b"
+
+  # Obtener valores del remote state
+  kubernetes_host    = data.terraform_remote_state.cluster_b[0].outputs.kubernetes_host
+  kubernetes_ca_cert = data.terraform_remote_state.cluster_b[0].outputs.kubernetes_ca_cert
+  token_reviewer_jwt = data.terraform_remote_state.cluster_b[0].outputs.token_reviewer_jwt
+
+  disable_iss_validation = false
+  disable_local_ca_jwt   = false
+
+  roles = var.cluster_b_roles
+}

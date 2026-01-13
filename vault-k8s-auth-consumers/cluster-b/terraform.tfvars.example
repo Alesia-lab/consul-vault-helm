@@ -1,0 +1,46 @@
+# Ejemplo de archivo terraform.tfvars para Cluster B
+# Copia este archivo a terraform.tfvars y ajusta los valores según tu entorno
+# ⚠️ NO commitear terraform.tfvars al repositorio
+
+cluster_name = "cluster-b"
+aws_region   = "us-east-1"
+# aws_profile  = "cluster-b-profile"  # Opcional, o usar AWS_PROFILE env var
+
+namespace            = "kube-system"
+service_account_name = "vault-auth-reviewer"
+
+# Ejemplo de anotaciones para IRSA en EKS (si aplica)
+# service_account_annotations = {
+#   "eks.amazonaws.com/role-arn" = "arn:aws:iam::ACCOUNT_ID:role/VaultReviewerRole"
+# }
+
+# ============================================================================
+# Configuración del Vault Agent Injector
+# ============================================================================
+
+# Instalar el Vault Agent Injector en el cluster
+install_vault_injector = true
+
+# Dirección del servidor de Vault
+vault_address = "https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com"
+
+# Deshabilitar verificación TLS (solo para desarrollo/testing con certificados autofirmados)
+vault_skip_tls_verify = true
+
+# Namespace donde se instalará el vault-injector
+vault_injector_namespace = "vault"
+
+# Crear el namespace si no existe
+vault_injector_create_namespace = true
+
+# Nombre del release de Helm
+vault_injector_release_name = "vault-injector"
+
+# Versión del chart de Helm (dejar vacío para usar la última)
+# vault_injector_chart_version = ""
+
+# Imagen del vault-agent (opcional, dejar vacío para usar la del chart)
+# vault_agent_image = "hashicorp/vault:1.20.4"
+
+# Timeout para la instalación de Helm (segundos)
+helm_timeout = 300

@@ -1,0 +1,60 @@
+# Values file de referencia para Vault Agent Injector
+# Este archivo muestra la configuración completa que se genera dinámicamente
+# a partir del template values.yaml.tpl
+#
+# Este archivo NO se usa directamente por Terraform, es solo para referencia.
+# El archivo real se genera desde values.yaml.tpl usando templatefile()
+
+server:
+  enabled: false
+
+injector:
+  agentDefaults:
+    extraEnvironmentVars:
+      VAULT_ADDR: https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+      VAULT_SKIP_VERIFY: true
+  externalVaultAddr: https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+
+
+  # Configuración adicional del injector (valores por defecto del chart)
+  # Estos valores se pueden agregar al template si se necesitan personalizar
+  
+  # Replicas del injector
+  # replicas: 1
+  
+  # Imagen del injector
+  # image:
+  #   repository: hashicorp/vault-k8s
+  #   tag: ""
+  #   pullPolicy: IfNotPresent
+  
+  # Imagen del vault-agent (si se especifica en variables)
+  # agentImage:
+  #   repository: hashicorp/vault
+  #   tag: "1.20.4"
+  
+  # Recursos del injector
+  # resources:
+  #   limits:
+  #     cpu: 500m
+  #     memory: 128Mi
+  #   requests:
+  #     cpu: 250m
+  #     memory: 64Mi
+  
+  # Recursos del vault-agent (por defecto)
+  # agentDefaults:
+  #   cpuLimit: "500m"
+  #   cpuRequest: "250m"
+  #   memLimit: "128Mi"
+  #   memRequest: "64Mi"
+  
+  # Configuración de TLS
+  # tlsSecretName: ""
+  
+  # Configuración de autenticación
+  # authPath: "auth/kubernetes"
+  
+  # Configuración de logging
+  # logLevel: info
+  # logFormat: standard

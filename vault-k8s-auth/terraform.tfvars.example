@@ -1,0 +1,206 @@
+# Ejemplo de archivo terraform.tfvars para Vault
+# Copia este archivo a terraform.tfvars y ajusta los valores según tu entorno
+#
+# ⚠️ ADVERTENCIA: Este archivo contiene valores sensibles
+# NO commitear terraform.tfvars al repositorio
+# Usar secret management (Vault, AWS Secrets Manager, etc.) o variables de entorno
+
+# Configuración de Vault
+# Opciones de address:
+# - https://vault.example.com:8200 (con TLS, requiere certificado válido o skip_tls_verify=true)
+# - http://vault.example.com:8200  (sin TLS, solo para desarrollo/testing)
+vault_address        = "https://vault.example.com:8200"
+vault_token          = "hvs.xxxxxxxxxxxxx"  # ⚠️ SENSIBLE - Usar métodos más seguros en producción
+
+# Para certificados autofirmados o cuando el certificado no coincide con el hostname:
+# ⚠️ ADVERTENCIA: Solo para desarrollo/testing. NUNCA en producción.
+vault_skip_tls_verify = false  # Cambiar a true si tienes certificado autofirmado
+
+# Opcional: Ruta al archivo CA cert si quieres validar un certificado autofirmado específico
+# Si se proporciona, se usa para validar incluso si skip_tls_verify=true
+vault_ca_cert_file   = "/path/to/vault-ca.crt"  # Opcional
+
+# ============================================================================
+# Path al proyecto de clusters consumidores
+# ============================================================================
+# Ruta absoluta al directorio raíz del proyecto vault-k8s-auth-consumers
+# Se usa para leer automáticamente los estados de Terraform de cada cluster
+consumers_project_path = "/home/edgar/ATT/vault-k8s-auth-consumers"
+
+# ============================================================================
+# KV v2 Secrets Engine
+# ============================================================================
+
+# Habilitar KV v2 secrets engine
+enable_kv_v2      = true
+kv_v2_path        = "secret"  # Path donde se habilitará (por defecto: "secret")
+kv_v2_description = "KV v2 secrets engine for versioned secrets"
+
+# ============================================================================
+# Vault Policies (Compartidas entre todos los clusters)
+# ============================================================================
+# Las políticas definen qué paths pueden acceder los roles
+# ⚠️ IMPORTANTE: Para KV v2, usar paths como "secret/data/*" y "secret/metadata/*"
+# Nota: Puedes usar ${var.kv_v2_path} para referenciar el path configurado arriba
+
+vault_policies = {
+  "app-readonly-policy" = {
+    policy_content = <<-POLICY
+      # Acceso de solo lectura a secretos de la aplicación
+      path "secret/data/app/*" {
+        capabilities = ["read", "list"]
+      }
+      
+      # Acceso a metadatos para versionado (solo lectura)
+      path "secret/metadata/app/*" {
+        capabilities = ["read", "list"]
+      }
+    POLICY
+  }
+  
+  "app-readwrite-policy" = {
+    policy_content = <<-POLICY
+      # Acceso completo a secretos de la aplicación
+      path "secret/data/app/*" {
+        capabilities = ["create", "read", "update", "delete", "list"]
+      }
+      
+      # Acceso a metadatos (incluyendo eliminación de versiones)
+      path "secret/metadata/app/*" {
+        capabilities = ["read", "list", "delete"]
+      }
+    POLICY
+  }
+  
+  "infra-readonly-policy" = {
+    policy_content = <<-POLICY
+      # Acceso de solo lectura a secretos de infraestructura
+      path "secret/data/infra/*" {
+        capabilities = ["read", "list"]
+      }
+      
+      path "secret/metadata/infra/*" {
+        capabilities = ["read", "list"]
+      }
+    POLICY
+  }
+}
+
+# ============================================================================
+# Configuración Dinámica de Clusters
+# ============================================================================
+# Define todos los clusters que quieres configurar en Vault.
+# Cada entrada especifica:
+# - use_remote_state: Si es true, lee del estado local. Si es false, usa config manual.
+# - config: Configuración manual (solo si use_remote_state = false)
+# - roles: Roles específicos para este cluster
+# - auth_path: Path del auth mount (opcional, por defecto: "kubernetes-{cluster_name}")
+# - disable_iss_validation: Deshabilitar validación del issuer (opcional, default: false)
+# - disable_local_ca_jwt: Deshabilitar validación del CA local (opcional, default: false)
+#
+# ⚠️ IMPORTANTE: 
+# - token_ttl y token_max_ttl deben ser números en segundos
+# - token_policies debe referenciar políticas definidas en vault_policies
+# - El nombre del cluster (key) debe coincidir con el directorio en vault-k8s-auth-consumers
+# Ejemplos: 3600 = 1 hora, 1800 = 30 minutos, 86400 = 24 horas
+
+clusters = {
+  # Ejemplo: Cluster B - Usando Remote State (Recomendado)
+  "cluster-b" = {
+    use_remote_state = true
+    
+    # Roles específicos para cluster-b
+    roles = {
+      "app-readonly" = {
+        bound_service_account_names      = ["app-sa", "readonly-sa"]
+        bound_service_account_namespaces = ["default", "app"]
+        token_policies                = ["app-readonly-policy"]
+        token_ttl                        = 3600    # 1 hora en segundos
+        token_max_ttl                    = 14400   # 4 horas en segundos
+      }
+      "app-readwrite" = {
+        bound_service_account_names      = ["app-sa"]
+        bound_service_account_namespaces = ["app"]
+        token_policies                   = ["app-readwrite-policy"]
+        token_ttl                        = 1800    # 30 minutos en segundos
+        token_max_ttl                    = 7200    # 2 horas en segundos
+      }
+    }
+    
+    # Opcional: Path personalizado del auth mount
+    # auth_path = "kubernetes-cluster-b"  # Por defecto: "kubernetes-cluster-b"
+    
+    # Opcional: Deshabilitar validaciones (solo para desarrollo/testing)
+    # disable_iss_validation = false
+    # disable_local_ca_jwt   = false
+  }
+  
+  # Ejemplo: Cluster C - Usando Remote State
+  "cluster-c" = {
+    use_remote_state = true
+    
+    roles = {
+      "app-readonly" = {
+        bound_service_account_names      = ["app-sa"]
+        bound_service_account_namespaces = ["app", "production"]
+        token_policies                   = ["app-readonly-policy"]
+        token_ttl                        = 3600
+        token_max_ttl                    = 14400
+      }
+      "infra-readonly" = {
+        bound_service_account_names      = ["infra-sa"]
+        bound_service_account_namespaces = ["kube-system", "infra"]
+        token_policies                   = ["infra-readonly-policy"]
+        token_ttl                        = 7200    # 2 horas
+        token_max_ttl                    = 28800   # 8 horas
+      }
+    }
+  }
+  
+  # Ejemplo: Cluster D - Usando Configuración Manual (sin Remote State)
+  # Útil para testing o cuando no se puede acceder al estado local
+  # "cluster-d" = {
+  #   use_remote_state = false
+  #   
+  #   # Configuración manual
+  #   config = {
+  #     token_reviewer_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6Ii4uLiJ9..."  # ⚠️ SENSIBLE
+  #     kubernetes_host    = "https://api.cluster-d.example.com"
+  #     kubernetes_ca_cert = <<-EOT
+  #       -----BEGIN CERTIFICATE-----
+  #       ...
+  #       -----END CERTIFICATE-----
+  #     EOT
+  #   }
+  #   
+  #   roles = {
+  #     "app-readonly" = {
+  #       bound_service_account_names      = ["app-sa"]
+  #       bound_service_account_namespaces = ["default"]
+  #       token_policies                   = ["app-readonly-policy"]
+  #       token_ttl                        = 3600
+  #       token_max_ttl                    = 14400
+  #     }
+  #   }
+  # }
+}
+
+# ============================================================================
+# Notas sobre Agregar Nuevos Clusters
+# ============================================================================
+# Para agregar un nuevo cluster (ej: cluster-e):
+#
+# 1. En vault-k8s-auth-consumers:
+#    - Crear directorio cluster-e/
+#    - Configurar y aplicar terraform
+#
+# 2. En este archivo (terraform.tfvars):
+#    - Agregar entrada en el mapa "clusters":
+#      "cluster-e" = {
+#        use_remote_state = true
+#        roles = { ... }
+#      }
+#
+# 3. Ejecutar terraform apply
+#
+# ¡Eso es todo! No necesitas modificar ningún archivo .tf

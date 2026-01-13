@@ -1,0 +1,147 @@
+# Deployment de Prueba con Inyección Automática de Variables de Entorno
+# Este ejemplo muestra cómo inyectar variables de entorno desde Vault
+# SIN modificar el comando de inicialización del contenedor principal
+#
+# Uso:
+# 1. Crear namespace y ServiceAccount:
+#    kubectl create namespace app
+#    kubectl create serviceaccount app-sa -n app
+#
+# 2. Crear secretos en Vault:
+#    vault kv put secret/app/database username=dbuser password=dbpass
+#    vault kv put secret/app/api-key api_key=sk-1234567890
+#
+# 3. Aplicar este deployment:
+#    kubectl apply -f test-deployment-env-auto.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-test-app-env-auto
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-test-env-auto
+  template:
+    metadata:
+      labels:
+        app: vault-test-env-auto
+      annotations:
+        # ====================================================================
+        # Configuración de Vault Agent Sidecar Injector
+        # ====================================================================
+        
+        # Habilitar el inyector
+        vault.hashicorp.com/agent-inject: "true"
+        
+        # Role de Kubernetes Auth
+        vault.hashicorp.com/role: "app-readonly"
+        
+        # Auth path
+        vault.hashicorp.com/auth-path: "auth/kubernetes-cluster-b"
+        
+        # ⚠️ IMPORTANTE: Dirección de Vault
+        vault.hashicorp.com/agent-extra-env: |
+          VAULT_ADDR=https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+        
+        # ⚠️ IMPORTANTE: Deshabilitar verificación TLS si Vault usa certificados autofirmados
+        vault.hashicorp.com/tls-skip-verify: "true"
+        
+        # ====================================================================
+        # Secretos a inyectar como variables de entorno
+        # ====================================================================
+        
+        # Database credentials como variables de entorno
+        vault.hashicorp.com/agent-inject-secret-env-database: "secret/data/app/database"
+        vault.hashicorp.com/agent-inject-template-env-database: |
+          {{- with secret "secret/data/app/database" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          {{- end }}
+        
+        # API Key como variable de entorno
+        vault.hashicorp.com/agent-inject-secret-env-api-key: "secret/data/app/api-key"
+        vault.hashicorp.com/agent-inject-template-env-api-key: |
+          {{- with secret "secret/data/app/api-key" -}}
+          API_KEY={{ .Data.data.api_key }}
+          {{- end }}
+
+    spec:
+      serviceAccountName: app-sa
+      
+      # ====================================================================
+      # Init Container: Configura variables de entorno automáticamente
+      # ====================================================================
+      # Este init container lee los archivos generados por vault-agent
+      # y crea un script que se ejecutará automáticamente antes del comando principal
+      initContainers:
+      - name: vault-env-loader
+        image: busybox:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Esperar a que vault-agent-init termine y genere los archivos
+            echo "Esperando a que vault-agent genere los archivos de variables de entorno..."
+            max_attempts=30
+            attempt=0
+            while [ $attempt -lt $max_attempts ]; do
+              if [ -f /vault/secrets/env-database ] || [ -f /vault/secrets/env-api-key ]; then
+                echo "Archivos de vault encontrados"
+                break
+              fi
+              attempt=$((attempt + 1))
+              sleep 1
+            done
+            
+            # Crear un script que cargue todas las variables de entorno
+            # Este script se ejecutará automáticamente antes del comando principal
+            cat > /shared/vault-env-loader.sh << 'EOF'
+            #!/bin/sh
+            # Cargar todas las variables de entorno desde archivos de vault
+            for env_file in /vault/secrets/env-*; do
+              if [ -f "$env_file" ]; then
+                set -a
+                . "$env_file"
+                set +a
+              fi
+            done
+            # Ejecutar el comando original pasando todos los argumentos
+            exec "$@"
+            EOF
+            
+            chmod +x /shared/vault-env-loader.sh
+            echo "Script de carga de variables creado exitosamente"
+        volumeMounts:
+        - name: vault-secrets
+          mountPath: /vault/secrets
+          readOnly: true
+        - name: shared-scripts
+          mountPath: /shared
+      
+      containers:
+      - name: app
+        image: nginx:alpine
+        # ✅ NO necesitamos modificar el comando aquí
+        # El init container creó un script wrapper que se ejecutará automáticamente
+        # Usamos el script wrapper como entrypoint, que carga las variables y ejecuta el comando original
+        command: ["/shared/vault-env-loader.sh"]
+        args: ["nginx", "-g", "daemon off;"]
+        # Si tu imagen tiene un ENTRYPOINT definido, puedes usar:
+        # command: ["/shared/vault-env-loader.sh"]
+        # args: []  # El script ejecutará el ENTRYPOINT original de la imagen
+        
+        # Nota: El vault-injector crea automáticamente el volumen vault-secrets
+        # No es necesario definirlo manualmente aquí
+        volumeMounts:
+        - name: vault-secrets
+          mountPath: /vault/secrets
+          readOnly: true
+        - name: shared-scripts
+          mountPath: /shared
+      
+      volumes:
+      # Volumen compartido para el script wrapper
+      - name: shared-scripts
+        emptyDir: {}

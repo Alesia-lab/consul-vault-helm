@@ -1,0 +1,124 @@
+# Deployment de Prueba con Vault Agent Sidecar Injector
+# Ejemplo más realista para testing
+#
+# Uso:
+# 1. Crear namespace y ServiceAccount:
+#    kubectl create namespace app
+#    kubectl create serviceaccount app-sa -n app
+#
+# 2. Crear secretos en Vault:
+#    vault kv put secret/app/database username=dbuser password=dbpass
+#    vault kv put secret/app/api-key api_key=sk-1234567890
+#
+# 3. Aplicar este deployment:
+#    kubectl apply -f test-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-test-app
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-test
+  template:
+    metadata:
+      labels:
+        app: vault-test
+      annotations:
+        # ====================================================================
+        # Configuración de Vault Agent Sidecar Injector
+        # ====================================================================
+        
+        # Habilitar el inyector
+        vault.hashicorp.com/agent-inject: "true"
+        
+        # Role de Kubernetes Auth
+        vault.hashicorp.com/role: "app-readonly"
+        
+        # Auth path
+        vault.hashicorp.com/auth-path: "auth/kubernetes-cluster-b"
+        
+        # ⚠️ IMPORTANTE: Dirección de Vault (debe ser accesible desde el cluster)
+        # 
+        # PROBLEMA COMÚN: El vault-injector genera una configuración JSON (VAULT_CONFIG)
+        # que tiene la dirección de Vault hardcodeada. Si el vault-injector no tiene
+        # configurado 'externalVaultAddr', usará la dirección por defecto 'vault.vault.svc:8200'
+        # que solo funciona cuando Vault está en el mismo cluster.
+        #
+        # SOLUCIÓN: El vault-injector DEBE tener configurado 'externalVaultAddr' correctamente.
+        # Si no está configurado, ejecuta:
+        #   ./fix-vault-injector-address.sh "https://tu-vault-address.com"
+        #   O en PowerShell:
+        #   .\fix-vault-injector-address.ps1 -VaultAddress "https://tu-vault-address.com"
+        #
+        # La anotación 'agent-extra-env' puede ayudar, pero la configuración JSON tiene prioridad.
+        # Por lo tanto, es CRÍTICO que el vault-injector tenga 'externalVaultAddr' configurado.
+        
+        # Variable de entorno (puede ser sobrescrita por la configuración JSON si externalVaultAddr no está configurado)
+        vault.hashicorp.com/agent-extra-env: |
+          VAULT_ADDR=https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+        
+        # ⚠️ IMPORTANTE: Deshabilitar verificación TLS si Vault usa certificados autofirmados
+        # Solo para desarrollo/testing. En producción, usar certificados válidos.
+        vault.hashicorp.com/tls-skip-verify: "true"
+        
+        # ====================================================================
+        # Secretos a inyectar como archivos
+        # ====================================================================
+        
+        # Database credentials
+        vault.hashicorp.com/agent-inject-secret-database: "secret/data/app/database"
+        vault.hashicorp.com/agent-inject-template-database: |
+          {{- with secret "secret/data/app/database" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          {{- end }}
+        
+        # API Key
+        vault.hashicorp.com/agent-inject-secret-api-key: "secret/data/app/api-key"
+        vault.hashicorp.com/agent-inject-template-api-key: |
+          {{- with secret "secret/data/app/api-key" -}}
+          API_KEY={{ .Data.data.api_key }}
+          {{- end }}
+        
+        # ====================================================================
+        # Opcional: Inyectar como variables de entorno
+        # ====================================================================
+        vault.hashicorp.com/agent-inject-secret-env-database: "secret/data/app/database"
+        vault.hashicorp.com/agent-inject-template-env-database: |
+          {{- with secret "secret/data/app/database" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          {{- end }}
+
+    spec:
+      serviceAccountName: app-sa
+      containers:
+      - name: app
+        image: nginx:alpine
+        # ⚠️ IMPORTANTE: Para que las variables de entorno inyectadas funcionen,
+        # necesitamos cargar el archivo generado por vault-agent antes de ejecutar la aplicación.
+        # El archivo /vault/secrets/env-database contiene las variables en formato KEY=VALUE.
+        # El vault-agent crea este archivo, pero necesitamos cargarlo manualmente en el proceso principal.
+        #
+        # Nota: Las variables estarán disponibles para el proceso principal (PID 1) y sus procesos hijos.
+        # Si haces 'kubectl exec' en el pod, necesitarás cargar el archivo manualmente en ese shell:
+        #   source /vault/secrets/env-database
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Cargar variables de entorno desde archivos generados por vault-agent
+            # El archivo ya está en formato KEY=VALUE, así que podemos usar 'set -a' y 'source'
+            if [ -f /vault/secrets/env-database ]; then
+              set -a  # Automáticamente exporta todas las variables
+              . /vault/secrets/env-database  # Cargar el archivo (equivalente a source)
+              set +a
+            fi
+            # Ejecutar la aplicación principal
+            # Las variables ahora están disponibles en el entorno del proceso y sus hijos
+            exec sleep 3600
+        # Nota: El vault-injector crea automáticamente el volumen vault-secrets
+        # No es necesario definirlo manualmente aquí

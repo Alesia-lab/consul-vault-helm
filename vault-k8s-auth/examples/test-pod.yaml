@@ -1,0 +1,69 @@
+# Pod de Prueba con Vault Agent Sidecar Injector
+# Este pod prueba la autenticación de Kubernetes y el acceso a secretos
+#
+# Uso:
+# 1. Asegurar que el ServiceAccount "app-sa" existe en namespace "app"
+# 2. Crear secretos en Vault: vault kv put secret/app/database username=user password=pass
+# 3. Aplicar este archivo: kubectl apply -f test-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vault-test
+  namespace: default
+  annotations:
+    # ========================================================================
+    # Configuración de Vault Agent Sidecar Injector
+    # ========================================================================
+    
+    # Habilitar el inyector
+    vault.hashicorp.com/agent-inject: "true"
+    
+    # Role de Kubernetes Auth a usar (debe existir en Vault)
+    vault.hashicorp.com/role: "app-chimera"
+    
+    # Auth path (debe coincidir con el configurado en Terraform)
+    vault.hashicorp.com/auth-path: "auth/kubernetes-cluster-c"
+    
+    # ⚠️ IMPORTANTE: Dirección de Vault (debe ser accesible desde el cluster)
+    # Si Vault está en otro cluster o externo, especificar aquí
+    # Si el vault-injector tiene externalVaultAddr configurado, esta anotación puede ser opcional
+    # pero es recomendable especificarla explícitamente para evitar problemas de DNS
+    vault.hashicorp.com/agent-extra-env: |
+      VAULT_ADDR=https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+    
+    # ⚠️ IMPORTANTE: Deshabilitar verificación TLS si Vault usa certificados autofirmados
+    # Solo para desarrollo/testing. En producción, usar certificados válidos.
+    vault.hashicorp.com/tls-skip-verify: "true"
+    
+    # ========================================================================
+    # Secretos a inyectar
+    # ========================================================================
+    
+    # Secreto 1: Database credentials
+    vault.hashicorp.com/agent-inject-secret-database: "secret/data/chimera/database"
+    vault.hashicorp.com/agent-inject-template-database: |
+      {{- with secret "secret/data/chimera/database" -}}
+      DB_USERNAME={{ .Data.data.username }}
+      DB_PASSWORD={{ .Data.data.password }}
+      {{- end }}
+
+    # Secreto 2: API Key
+    vault.hashicorp.com/agent-inject-secret-api-key: "secret/data/chimera/api-key"
+    vault.hashicorp.com/agent-inject-template-api-key: |
+      {{- with secret "secret/data/chimera/api-key" -}}
+      API_KEY={{ .Data.data.api_key }}
+      {{- end }}
+    
+    # Opcional: Configuración adicional del agent
+    #vault.hashicorp.com/agent-pre-populate: "true"
+    #vault.hashicorp.com/agent-pre-populate-only: "false"
+    
+spec:
+  serviceAccountName: app-sa
+  containers:
+  - name: test
+    image: busybox:latest
+    command: ["/bin/sh", "-c", "sleep 3600"]
+    # Nota: El vault-injector crea automáticamente el volumen vault-secrets
+    # No es necesario definirlo manualmente aquí

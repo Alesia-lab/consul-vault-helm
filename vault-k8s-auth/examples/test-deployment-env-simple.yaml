@@ -1,0 +1,61 @@
+# Deployment de Prueba con Inyección Simple de Variables de Entorno
+# Versión simplificada que usa un script wrapper más simple
+#
+# Esta versión asume que el vault-agent-init ya terminó y los archivos están disponibles
+# cuando el contenedor principal inicia
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-test-app-env-simple
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-test-env-simple
+  template:
+    metadata:
+      labels:
+        app: vault-test-env-simple
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "app-readonly"
+        vault.hashicorp.com/auth-path: "auth/kubernetes-cluster-b"
+        vault.hashicorp.com/agent-extra-env: |
+          VAULT_ADDR=https://k8s-vault-vaultui-62506ffd89-622e5694cde0e9a6.elb.us-east-1.amazonaws.com
+        vault.hashicorp.com/tls-skip-verify: "true"
+        
+        # Variables de entorno desde Vault
+        vault.hashicorp.com/agent-inject-secret-env-database: "secret/data/app/database"
+        vault.hashicorp.com/agent-inject-template-env-database: |
+          {{- with secret "secret/data/app/database" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          {{- end }}
+
+    spec:
+      serviceAccountName: app-sa
+      containers:
+      - name: app
+        image: nginx:alpine
+        # ✅ Solución simple: usar un wrapper inline que carga las variables
+        # y ejecuta el comando original sin modificar la lógica de la aplicación
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            # Cargar variables de entorno desde vault (si existen)
+            [ -f /vault/secrets/env-database ] && set -a && . /vault/secrets/env-database && set +a || true
+            # Ejecutar el comando original de la imagen
+            exec nginx -g "daemon off;"
+        
+        # Para imágenes con ENTRYPOINT, puedes usar:
+        # command: ["/bin/sh", "-c"]
+        # args:
+        #   - |
+        #     [ -f /vault/secrets/env-database ] && set -a && . /vault/secrets/env-database && set +a || true
+        #     exec "$0" "$@"
+        #   - /docker-entrypoint.sh  # El ENTRYPOINT original de la imagen
+        #   - nginx
+        #   - -g
+        #   - "daemon off;"
