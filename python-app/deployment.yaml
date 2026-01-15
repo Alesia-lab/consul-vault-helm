@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-microservice
+  labels:
+    app: python-microservice
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-microservice
+  template:
+    metadata:
+      labels:
+        app: python-microservice
+        version: v1
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "app-chimera"
+        vault.hashicorp.com/auth-path: "auth/kubernetes-lumina"
+        vault.hashicorp.com/agent-inject-secret-NOMBRE: "secret/data/app-chimera"
+        vault.hashicorp.com/agent-inject-template-NOMBRE: |
+          {{- with secret "secret/data/app-chimera" -}}
+          export NOMBRE="{{ .Data.data.nombre }}"
+          {{- end -}}
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: python-microservice
+        image: python-microservice:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        # NOMBRE será inyectado por Vault Agent Injector desde el archivo generado
+        # El archivo se encuentra en /vault/secrets/NOMBRE y se carga automáticamente
+        envFrom:
+        - configMapRef:
+            name: python-microservice-config
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-microservice-service
+  labels:
+    app: python-microservice
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: python-microservice
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-microservice-config
+data:
+  APP_NAME: "Python Microservice"
+  APP_VERSION: "1.0.0"
+  DEBUG: "false"
