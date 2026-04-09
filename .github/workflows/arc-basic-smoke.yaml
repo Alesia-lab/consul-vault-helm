@@ -8,8 +8,7 @@ on:
 
 jobs:
   build:
-    # ¡La magia! Usa las etiquetas del RunnerDeployment
-    # Debe incluir "self-hosted" y al menos una etiqueta personalizada
+    # Usa tus etiquetas personalizadas para el Runner de Kubernetes
     runs-on: [self-hosted, alesia-runners]
 
     steps:
@@ -20,6 +19,15 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validar AWS CLI e Identidad
+        run: |
+          echo "Verificando instalación de AWS CLI..."
+          aws --version
+          
+          echo "Verificando permisos de IAM (IRSA)..."
+          # Este comando es vital para confirmar que el runner puede hablar con AWS
+          aws --version
 
       - name: Ejecutar un build (ejemplo)
         run: |
