@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     # Usa tus etiquetas personalizadas para el Runner de Kubernetes
-    runs-on: [docker, aws, alesia-runners]
+    runs-on: arc-runner-set
 
     steps:
       - name: Verificar el runner
