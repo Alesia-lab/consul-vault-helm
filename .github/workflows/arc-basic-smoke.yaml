@@ -28,6 +28,7 @@ jobs:
           echo "Verificando permisos de IAM (IRSA)..."
           # Este comando es vital para confirmar que el runner puede hablar con AWS
           aws --version
+          sleep 300
           zip -v
 
       - name: Ejecutar un build (ejemplo)
